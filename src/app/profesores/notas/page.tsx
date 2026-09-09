@@ -89,221 +89,408 @@ const [cargandoRespuestas, setCargandoRespuestas] = useState(false);
 }
 
   async function descargarExcel() {
-  const { data: respuestas, error } = await supabase.rpc(
-    "obtener_todas_respuestas_profesor"
-  );
+  setError("");
 
-  if (error) {
-    setError(error.message);
-    return;
-  }
+  try {
+    const TAMANO_PAGINA = 1000;
+    let todasLasRespuestas: any[] = [];
+    let desde = 0;
 
-  if (!respuestas || respuestas.length === 0) {
-    setError("No existen respuestas para descargar.");
-    return;
-  }
+    while (true) {
+      const { data: respuestas, error } = await supabase
+        .rpc("obtener_todas_respuestas_profesor")
+        .range(desde, desde + TAMANO_PAGINA - 1);
 
-  const preguntas = Array.from(
-    new Map(
-      respuestas.map((respuesta: any) => [
-        respuesta.numero,
-        {
-          numero: respuesta.numero,
-          pregunta: respuesta.pregunta,
-        },
-      ])
-    ).values()
-  ).sort((a: any, b: any) => a.numero - b.numero);
+      if (error) {
+        setError(error.message);
+        return;
+      }
 
-  const alumnos = Array.from(
-    new Map(
-      respuestas.map((respuesta: any) => [
-        respuesta.participante_id,
-        {
-          participante_id: respuesta.participante_id,
-          nombre: respuesta.nombre,
-          nota: respuesta.nota,
-          fecha_finalizacion: respuesta.fecha_finalizacion,
-        },
-      ])
-    ).values()
-  );
+      if (!respuestas || respuestas.length === 0) {
+        break;
+      }
 
-  const encabezados = [
-    ...preguntas.map(
-      (pregunta: any) =>
-        `${pregunta.numero}. ${pregunta.pregunta}`
-    ),
-    "Puntuación",
-    "Nombres y Apellidos",
-    "Fecha",
-  ];
+      todasLasRespuestas.push(...respuestas);
 
-  const filas = alumnos.map((alumno: any) => {
-    const respuestasDelAlumno = respuestas.filter(
-      (respuesta: any) =>
-        respuesta.participante_id === alumno.participante_id
-    );
-
-    const respuestasPorPregunta = preguntas.map((pregunta: any) => {
-      const respuesta = respuestasDelAlumno.find(
-        (item: any) => item.numero === pregunta.numero
+      console.log(
+        `Página desde ${desde}: ${respuestas.length} respuestas`
       );
 
-      return respuesta?.respuesta_marcada ?? "";
-    });
+      console.log(
+        `Total acumulado: ${todasLasRespuestas.length}`
+      );
 
-    return [
-      ...respuestasPorPregunta,
-      alumno.nota,
-      alumno.nombre,
-      formatearFecha(alumno.fecha_finalizacion),
-    ];
-  });
+      // Si recibimos menos de 1000,
+      // significa que ya llegamos al final.
+      if (respuestas.length < TAMANO_PAGINA) {
+        break;
+      }
 
-  const hoja = XLSX.utils.aoa_to_sheet([
-    encabezados,
-    ...filas,
-  ]);
-
-  const ultimaFila = filas.length + 1;
-  const ultimaColumna = encabezados.length - 1;
-
-  const rango = XLSX.utils.decode_range(
-    hoja["!ref"] as string
-  );
-
-  const borde = {
-    top: {
-      style: "thin",
-      color: { rgb: "D9D9E3" },
-    },
-    bottom: {
-      style: "thin",
-      color: { rgb: "D9D9E3" },
-    },
-    left: {
-      style: "thin",
-      color: { rgb: "D9D9E3" },
-    },
-    right: {
-      style: "thin",
-      color: { rgb: "D9D9E3" },
-    },
-  };
-
-  for (let fila = rango.s.r; fila <= rango.e.r; fila++) {
-    for (
-      let columna = rango.s.c;
-      columna <= rango.e.c;
-      columna++
-    ) {
-      const celda = hoja[
-        XLSX.utils.encode_cell({ r: fila, c: columna })
-      ];
-
-      if (!celda) continue;
-
-      celda.s = {
-        border: borde,
-        alignment: {
-          vertical: "center",
-          horizontal: fila === 0 ? "center" : "left",
-          wrapText: true,
-        },
-        font: {
-          name: "Arial",
-          sz: 10,
-          bold: fila === 0,
-          color: {
-            rgb: fila === 0 ? "FFFFFF" : "222222",
-          },
-        },
-        fill: {
-          fgColor: {
-            rgb:
-              fila === 0
-                ? "5E35B1"
-                : fila % 2 === 0
-                ? "F4F1FB"
-                : "FFFFFF",
-          },
-        },
-      };
+      desde += TAMANO_PAGINA;
     }
+
+    const respuestas = todasLasRespuestas;
+
+    console.log(
+      "TOTAL RESPUESTAS DESCARGADAS:",
+      respuestas.length
+    );
+
+    console.log(
+      "TOTAL ALUMNOS DESCARGADOS:",
+      new Set(
+        respuestas.map(
+          (respuesta: any) =>
+            respuesta.participante_id
+        )
+      ).size
+    );
+
+    if (respuestas.length === 0) {
+      setError(
+        "No existen respuestas para descargar."
+      );
+      return;
+    }
+
+    // ==============================
+    // OBTENER PREGUNTAS
+    // ==============================
+
+    const preguntas = Array.from(
+      new Map(
+        respuestas.map((respuesta: any) => [
+          respuesta.numero,
+          {
+            numero: respuesta.numero,
+            pregunta: respuesta.pregunta,
+          },
+        ])
+      ).values()
+    ).sort(
+      (a: any, b: any) =>
+        a.numero - b.numero
+    );
+
+    // ==============================
+    // OBTENER ALUMNOS
+    // ==============================
+
+    const alumnos = Array.from(
+      new Map(
+        respuestas.map((respuesta: any) => [
+          respuesta.participante_id,
+          {
+            participante_id:
+              respuesta.participante_id,
+            nombre: respuesta.nombre,
+            nota: respuesta.nota,
+            fecha_finalizacion:
+              respuesta.fecha_finalizacion,
+          },
+        ])
+      ).values()
+    );
+
+    // ==============================
+    // ENCABEZADOS
+    // ==============================
+
+    const encabezados = [
+      ...preguntas.map(
+        (pregunta: any) =>
+          `${pregunta.numero}. ${pregunta.pregunta}`
+      ),
+      "Puntuación",
+      "Nombres y Apellidos",
+      "Fecha",
+    ];
+
+    // ==============================
+// INDEXAR RESPUESTAS
+// ==============================
+
+const respuestasPorAlumno = new Map<
+  string,
+  Map<number, any>
+>();
+
+for (const respuesta of respuestas) {
+  if (!respuestasPorAlumno.has(respuesta.participante_id)) {
+    respuestasPorAlumno.set(
+      respuesta.participante_id,
+      new Map()
+    );
   }
 
-  // Destacar las columnas finales
-  for (let fila = 1; fila <= ultimaFila; fila++) {
-    const celdaNota = hoja[
-      XLSX.utils.encode_cell({
-        r: fila,
-        c: ultimaColumna - 2,
-      })
-    ];
+  respuestasPorAlumno
+    .get(respuesta.participante_id)!
+    .set(respuesta.numero, respuesta);
+}
 
-    const celdaNombre = hoja[
-      XLSX.utils.encode_cell({
-        r: fila,
-        c: ultimaColumna - 1,
-      })
-    ];
+// ==============================
+// CREAR FILAS
+// ==============================
 
-    const celdaFecha = hoja[
-      XLSX.utils.encode_cell({
-        r: fila,
-        c: ultimaColumna,
-      })
-    ];
+const filas = alumnos.map((alumno: any) => {
+  const respuestasDelAlumno =
+    respuestasPorAlumno.get(
+      alumno.participante_id
+    ) ?? new Map<number, any>();
 
-    [celdaNota, celdaNombre, celdaFecha].forEach((celda) => {
-      if (celda) {
+  const respuestasPorPregunta = preguntas.map(
+    (pregunta: any) => {
+      const respuesta =
+        respuestasDelAlumno.get(
+          pregunta.numero
+        );
+
+      return (
+        respuesta?.respuesta_marcada ?? ""
+      );
+    }
+  );
+
+  return [
+    ...respuestasPorPregunta,
+    alumno.nota,
+    alumno.nombre,
+    formatearFecha(
+      alumno.fecha_finalizacion
+    ),
+  ];
+});
+
+    // ==============================
+    // CREAR HOJA
+    // ==============================
+
+    const hoja = XLSX.utils.aoa_to_sheet([
+      encabezados,
+      ...filas,
+    ]);
+
+    const ultimaFila =
+      filas.length + 1;
+
+    const ultimaColumna =
+      encabezados.length - 1;
+
+    const rango =
+      XLSX.utils.decode_range(
+        hoja["!ref"] as string
+      );
+
+    // ==============================
+    // BORDES
+    // ==============================
+
+    const borde = {
+      top: {
+        style: "thin",
+        color: { rgb: "D9D9E3" },
+      },
+      bottom: {
+        style: "thin",
+        color: { rgb: "D9D9E3" },
+      },
+      left: {
+        style: "thin",
+        color: { rgb: "D9D9E3" },
+      },
+      right: {
+        style: "thin",
+        color: { rgb: "D9D9E3" },
+      },
+    };
+
+    // ==============================
+    // ESTILOS
+    // ==============================
+
+    for (
+      let fila = rango.s.r;
+      fila <= rango.e.r;
+      fila++
+    ) {
+      for (
+        let columna = rango.s.c;
+        columna <= rango.e.c;
+        columna++
+      ) {
+        const celda =
+          hoja[
+            XLSX.utils.encode_cell({
+              r: fila,
+              c: columna,
+            })
+          ];
+
+        if (!celda) continue;
+
         celda.s = {
-          ...celda.s,
+          border: borde,
+          alignment: {
+            vertical: "center",
+            horizontal:
+              fila === 0
+                ? "center"
+                : "left",
+            wrapText: true,
+          },
           font: {
             name: "Arial",
             sz: 10,
-            bold: true,
-            color: { rgb: "222222" },
+            bold: fila === 0,
+            color: {
+              rgb:
+                fila === 0
+                  ? "FFFFFF"
+                  : "222222",
+            },
+          },
+          fill: {
+            fgColor: {
+              rgb:
+                fila === 0
+                  ? "5E35B1"
+                  : fila % 2 === 0
+                  ? "F4F1FB"
+                  : "FFFFFF",
+            },
           },
         };
       }
-    });
+    }
+
+    // ==============================
+    // DESTACAR COLUMNAS FINALES
+    // ==============================
+
+    for (
+      let fila = 1;
+      fila <= ultimaFila;
+      fila++
+    ) {
+      const celdaNota =
+        hoja[
+          XLSX.utils.encode_cell({
+            r: fila,
+            c: ultimaColumna - 2,
+          })
+        ];
+
+      const celdaNombre =
+        hoja[
+          XLSX.utils.encode_cell({
+            r: fila,
+            c: ultimaColumna - 1,
+          })
+        ];
+
+      const celdaFecha =
+        hoja[
+          XLSX.utils.encode_cell({
+            r: fila,
+            c: ultimaColumna,
+          })
+        ];
+
+      [
+        celdaNota,
+        celdaNombre,
+        celdaFecha,
+      ].forEach((celda) => {
+        if (celda) {
+          celda.s = {
+            ...celda.s,
+            font: {
+              name: "Arial",
+              sz: 10,
+              bold: true,
+              color: {
+                rgb: "222222",
+              },
+            },
+          };
+        }
+      });
+    }
+
+    // ==============================
+    // ANCHO DE COLUMNAS
+    // ==============================
+
+    hoja["!cols"] = [
+      ...preguntas.map(() => ({
+        wch: 32,
+      })),
+      { wch: 14 },
+      { wch: 28 },
+      { wch: 14 },
+    ];
+
+    // ==============================
+    // ALTO DE FILAS
+    // ==============================
+
+    hoja["!rows"] = [
+      { hpt: 95 },
+      ...filas.map(() => ({
+        hpt: 28,
+      })),
+    ];
+
+    // ==============================
+    // FILTRO
+    // ==============================
+
+    hoja["!autofilter"] = {
+      ref: `A1:${XLSX.utils.encode_col(
+        ultimaColumna
+      )}${ultimaFila}`,
+    };
+
+    // ==============================
+    // CONGELAR ENCABEZADO
+    // ==============================
+
+    hoja["!freeze"] = {
+      xSplit: 0,
+      ySplit: 1,
+    };
+
+    // ==============================
+    // CREAR LIBRO
+    // ==============================
+
+    const libro =
+      XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(
+      libro,
+      hoja,
+      "Resultados"
+    );
+
+    // ==============================
+    // DESCARGAR
+    // ==============================
+
+    XLSX.writeFile(
+      libro,
+      "resultados_discipulado.xlsx"
+    );
+  } catch (error) {
+    console.error(
+      "Error descargando Excel:",
+      error
+    );
+
+    setError(
+      "Ocurrió un error al generar el archivo Excel."
+    );
   }
-
-  hoja["!cols"] = [
-    ...preguntas.map(() => ({ wch: 32 })),
-    { wch: 14 },
-    { wch: 28 },
-    { wch: 14 },
-  ];
-
-  hoja["!rows"] = [
-    { hpt: 95 },
-    ...filas.map(() => ({ hpt: 28 })),
-  ];
-
-  hoja["!autofilter"] = {
-    ref: `A1:${XLSX.utils.encode_col(ultimaColumna)}${ultimaFila}`,
-  };
-
-  hoja["!freeze"] = {
-    xSplit: 0,
-    ySplit: 1,
-  };
-
-  const libro = XLSX.utils.book_new();
-
-  XLSX.utils.book_append_sheet(
-    libro,
-    hoja,
-    "Resultados"
-  );
-
-  XLSX.writeFile(
-    libro,
-    "resultados_discipulado.xlsx"
-  );
 }
 
   return (
